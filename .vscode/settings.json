@@ -1,0 +1,14 @@
+{
+    "python.testing.pytestArgs": [
+        "DBM"
+    ],
+    "python.testing.unittestEnabled": true,
+    "python.testing.pytestEnabled": false,
+    "python.testing.unittestArgs": [
+        "-v",
+        "-s",
+        "./DBM",
+        "-p",
+        "*test.py"
+    ]
+}
