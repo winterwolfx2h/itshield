@@ -41,8 +41,8 @@ def fetch_database_performance(database):
 
     try:
         db = mysql.connector.connect(
-            host="10.77.77.20",  # Update with your Linux MySQL server IP
-            user="root",
+            host="192.168.71.132",  # Update with your Linux MySQL server IP
+            user="dbmuser",
             password="Root@12345",
             database="employees"
         )
@@ -72,8 +72,8 @@ def fetch_database_status(database):
 
     try:
         db = mysql.connector.connect(
-            host="10.77.77.20",
-            user="root",
+            host="192.168.71.132",
+            user="dbmuser",
             password="Root@12345",
             database="employees"
         )
@@ -109,8 +109,8 @@ def is_excluded_query(query):
 def fetch_process_list():
     try:
         db = mysql.connector.connect(
-            host="10.77.77.20",
-            user="root",
+            host="192.168.71.132",
+            user="dbmuser",
             password="Root@12345",
             database="employees"
         )
