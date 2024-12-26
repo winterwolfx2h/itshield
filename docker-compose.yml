@@ -24,7 +24,12 @@ services:
       - "3306:3306"
     volumes:
       - db_data:/var/lib/mysql
+<<<<<<< HEAD
 
+=======
+      - ./mysql_logs:/var/log/mysql  # Mount for logs
+      - ./my.cnf:/etc/mysql/my.cnf  # Mount the custom my.cnf
+>>>>>>> 84b059b802e4741a45b630a7529d5c60c43004f1
 volumes:
   db_data:
 
