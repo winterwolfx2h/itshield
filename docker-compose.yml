@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: ./DBM
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./DBM:/app
+    environment:
+      - FLASK_ENV=development
+    container_name: itshield_app
+
+  db:
+    image: mysql:8.0
+    container_name: itshield_db
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: itshield
+      MYSQL_USER: dbuser
+      MYSQL_PASSWORD: dbpass
+    ports:
+      - "3306:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+
+volumes:
+  db_data:
+
