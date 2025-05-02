@@ -8,11 +8,12 @@ services:
       - ./DBM:/app
       - mysql_logs:/var/log/mysql
       - postgres_logs:/var/log/postgres
-      - app_data:/app
     environment:
       - FLASK_DEBUG=1
+      - MYSQL_HOST=mysql_db
       - MYSQL_USER=dbuser
       - MYSQL_PASSWORD=dbpass
+      - POSTGRES_HOST=postgres_db
       - POSTGRES_USER=pguser
       - POSTGRES_PASSWORD=pgpass
     container_name: itshield_app
@@ -27,7 +28,7 @@ services:
     container_name: itshield_mysql_db
     environment:
       MYSQL_ROOT_PASSWORD: rootpass
-      MYSQL_DATABASE: itshield
+      MYSQL_DATABASE: employees
       MYSQL_USER: dbuser
       MYSQL_PASSWORD: dbpass
     ports:
@@ -82,7 +83,6 @@ volumes:
   postgres_data:
   mysql_logs:
   postgres_logs:
-  app_data:
 
 networks:
   app-network:

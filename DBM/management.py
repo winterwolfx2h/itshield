@@ -1,5 +1,6 @@
 from flask import Blueprint, render_template, request, jsonify
 import mysql.connector
+import psycopg2
 import subprocess
 import platform
 
@@ -13,6 +14,7 @@ def management():
 
 @management_bp.route('/add_database', methods=['POST'])
 def add_database():
+    db_type = request.form['type']
     host = request.form['host']
     port = request.form['port']
     user = request.form['user']
@@ -20,23 +22,35 @@ def add_database():
     database = request.form['database']
     
     try:
-        connection = mysql.connector.connect(
-            host=host,
-            port=port,
-            user=user,
-            password=password,
-            database=database
-        )
-        connection.close()
-        databases.append({
-            'host': host,
-            'port': port,
-            'user': user,
-            'password': password,
-            'database': database
-        })
-        return jsonify({"status": "success"})
-    except mysql.connector.Error as err:
+        if db_type == "mysql":
+            connection = mysql.connector.connect(
+                host=host,
+                port=port,
+                user=user,
+                password=password,
+                database=database
+            )
+        else:
+            connection = psycopg2.connect(
+                host=host,
+                port=port,
+                user=user,
+                password=password,
+                database=database
+            )
+
+        if (db_type == "mysql" and connection.is_connected()) or (db_type == "postgres"):
+            connection.close()
+            databases.append({
+                'type': db_type,
+                'host': host,
+                'port': port,
+                'user': user,
+                'password': password,
+                'database': database
+            })
+            return jsonify({"status": "success"})
+    except (mysql.connector.Error, psycopg2.Error) as err:
         return jsonify({"status": "error", "message": str(err)}), 400
 
 @management_bp.route('/remove_database', methods=['POST'])
@@ -46,44 +60,46 @@ def remove_database():
         databases.pop(index)
     return jsonify({"status": "success"})
 
-def manage_database(command, host, port):
+def manage_database(command, db_type, host, port):
     try:
-        mysql_service_name = 'mysqld'  # Correct service name for MySQL on Linux
+        service_name = 'mysqld' if db_type == "mysql" else 'postgresql'
 
         if platform.system() == "Windows":
             if command == 'start':
-                subprocess.run(['net', 'start', mysql_service_name], check=True)
+                subprocess.run(['net', 'start', service_name], check=True)
             elif command == 'stop':
-                subprocess.run(['net', 'stop', mysql_service_name], check=True)
+                subprocess.run(['net', 'stop', service_name], check=True)
             elif command == 'restart':
-                subprocess.run(['net', 'stop', mysql_service_name], check=True)
-                subprocess.run(['net', 'start', mysql_service_name], check=True)
+                subprocess.run(['net', 'stop', service_name], check=True)
+                subprocess.run(['net', 'start', service_name], check=True)
         else:
             if command == 'start':
-                subprocess.run(['systemctl', 'start', mysql_service_name], check=True)
+                subprocess.run(['systemctl', 'start', service_name], check=True)
             elif command == 'stop':
-                subprocess.run(['systemctl', 'stop', mysql_service_name], check=True)
+                subprocess.run(['systemctl', 'stop', service_name], check=True)
             elif command == 'restart':
-                subprocess.run(['systemctl', 'restart', mysql_service_name], check=True)
-        return jsonify({"status": "success", "message": f"Database {command}ed successfully on {host}:{port}"})
+                subprocess.run(['systemctl', 'restart', service_name], check=True)
+        return jsonify({"status": "success", "message": f"{db_type.capitalize()} database {command}ed successfully on {host}:{port}"})
     except subprocess.CalledProcessError as e:
-        return jsonify({"status": "error", "message": f"Failed to {command} database on {host}:{port}: {str(e)}"}), 500
+        return jsonify({"status": "error", "message": f"Failed to {command} {db_type} database on {host}:{port}: {str(e)}"}), 500
 
 @management_bp.route('/start_database', methods=['POST'])
 def start_database():
+    db_type = request.form['type']
     host = request.form['host']
     port = request.form['port']
-    return manage_database('start', host, port)
+    return manage_database('start', db_type, host, port)
 
 @management_bp.route('/stop_database', methods=['POST'])
 def stop_database():
+    db_type = request.form['type']
     host = request.form['host']
     port = request.form['port']
-    return manage_database('stop', host, port)
+    return manage_database('stop', db_type, host, port)
 
 @management_bp.route('/restart_database', methods=['POST'])
 def restart_database():
+    db_type = request.form['type']
     host = request.form['host']
     port = request.form['port']
-    return manage_database('restart', host, port)
-
+    return manage_database('restart', db_type, host, port)

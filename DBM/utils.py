@@ -1,7 +1,6 @@
 import mysql.connector
+from mysql.connector import Error
 import psycopg2
-from mysql.connector import Error as MySQLError
-from psycopg2 import Error as PostgresError
 import tailer
 import re
 from collections import deque, defaultdict
@@ -11,8 +10,8 @@ import os
 # Use deque to maintain the last 100 queries
 query_history = deque(maxlen=100)
 daily_query_stats = defaultdict(lambda: defaultdict(int))
-processed_queries = set()
-last_emitted_query = None
+processed_queries = set()  # Keep track of processed queries
+last_emitted_query = None  # Track the last emitted query
 
 EXCLUDED_QUERIES = [
     "SELECT @@hostname AS device_hostname",
@@ -21,13 +20,13 @@ EXCLUDED_QUERIES = [
     "SET GLOBAL general_log = 'OFF'",
     "SET GLOBAL general_log_file",
     "SET GLOBAL general_log = 'ON'",
-    "SET @@session.autocommit = OFF",
     "SET autocommit=0",
     "SELECT st.* FROM performance_schema.events_waits_history_long st",
     "SET NAMES utf8mb4",
     "SHOW GLOBAL STATUS",
     "SHOW FULL COLUMNS",
-    "SHOW"
+    "SHOW",
+    "SELECT pid, usename, application_name, client_addr, state, query FROM pg_stat_activity"
 ]
 EXCLUDED_PREFIXES = [
     "SET GLOBAL general_log_file",
@@ -40,6 +39,111 @@ EXCLUDED_PREFIXES = [
     "SHOW"
 ]
 
+def get_db_connection(db_type, host, user, password, database):
+    try:
+        if db_type == "mysql":
+            return mysql.connector.connect(
+                host=host,
+                user=user,
+                password=password,
+                database=database
+            )
+        elif db_type == "postgres":
+            return psycopg2.connect(
+                host=host,
+                user=user,
+                password=password,
+                database=database,
+                port=5432
+            )
+    except (mysql.connector.Error, psycopg2.Error) as e:
+        print(f"Error connecting to {db_type} database: {e}")
+        return None
+    return None
+
+def fetch_database_performance(database, db_type="mysql"):
+    performance_stats = defaultdict(int)
+    host = os.getenv("MYSQL_HOST", "mysql_db") if db_type == "mysql" else os.getenv("POSTGRES_HOST", "postgres_db")
+    user = os.getenv("MYSQL_USER", "dbuser") if db_type == "mysql" else os.getenv("POSTGRES_USER", "pguser")
+    password = os.getenv("MYSQL_PASSWORD", "dbpass") if db_type == "mysql" else os.getenv("POSTGRES_PASSWORD", "pgpass")
+    db_name = database
+
+    try:
+        db = get_db_connection(db_type, host, user, password, db_name)
+        if not db:
+            return performance_stats
+
+        cursor = db.cursor() if db_type == "mysql" else db.cursor()
+
+        if db_type == "mysql":
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Queries'")
+            result = cursor.fetchone()
+            performance_stats['queries'] = int(result[1]) if result else 0
+
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Connections'")
+            result = cursor.fetchone()
+            performance_stats['connections'] = int(result[1]) if result else 0
+
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Uptime'")
+            result = cursor.fetchone()
+            performance_stats['uptime'] = int(result[1]) if result else 0
+        else:
+            cursor.execute("SELECT COUNT(*) FROM pg_stat_activity")
+            performance_stats['connections'] = cursor.fetchone()[0]
+
+            cursor.execute("SELECT EXTRACT(EPOCH FROM (NOW() - pg_postmaster_start_time()))")
+            performance_stats['uptime'] = int(cursor.fetchone()[0])
+
+        cursor.close()
+        db.close()
+    except (mysql.connector.Error, psycopg2.Error) as e:
+        print(f"Error fetching performance data for {database} ({db_type}): {e}")
+
+    return performance_stats
+
+def fetch_database_status(database, db_type="mysql"):
+    status_stats = defaultdict(int)
+    host = os.getenv("MYSQL_HOST", "mysql_db") if db_type == "mysql" else os.getenv("POSTGRES_HOST", "postgres_db")
+    user = os.getenv("MYSQL_USER", "dbuser") if db_type == "mysql" else os.getenv("POSTGRES_USER", "pguser")
+    password = os.getenv("MYSQL_PASSWORD", "dbpass") if db_type == "mysql" else os.getenv("POSTGRES_PASSWORD", "pgpass")
+    db_name = database
+
+    try:
+        db = get_db_connection(db_type, host, user, password, db_name)
+        if not db:
+            return status_stats
+
+        cursor = db.cursor() if db_type == "mysql" else db.cursor()
+
+        if db_type == "mysql":
+            cursor.execute("SHOW STATUS LIKE 'Threads_connected'")
+            result = cursor.fetchone()
+            status_stats['threads_connected'] = int(result[1]) if result else 0
+
+            cursor.execute("SHOW STATUS LIKE 'Threads_running'")
+            result = cursor.fetchone()
+            status_stats['threads_running'] = int(result[1]) if result else 0
+
+            cursor.execute("SHOW STATUS LIKE 'Uptime'")
+            result = cursor.fetchone()
+            status_stats['uptime'] = int(result[1]) if result else 0
+        else:
+            cursor.execute("SELECT COUNT(*) FROM pg_stat_activity WHERE state = 'active'")
+            status_stats['threads_running'] = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM pg_stat_activity")
+            status_stats['threads_connected'] = cursor.fetchone()[0]
+
+            cursor.execute("SELECT EXTRACT(EPOCH FROM (NOW() - pg_postmaster_start_time()))")
+            status_stats['uptime'] = int(cursor.fetchone()[0])
+
+        cursor.close()
+        db.close()
+    except (mysql.connector.Error, psycopg2.Error) as e:
+        print(f"Error fetching status data for {database} ({db_type}): {e}")
+
+    return status_stats
+
 def is_excluded_query(query):
     query_lower = query.lower()
     if any(query_lower == excluded_query.lower() for excluded_query in EXCLUDED_QUERIES):
@@ -48,60 +152,55 @@ def is_excluded_query(query):
         return True
     return False
 
-def fetch_process_list(connection):
+def fetch_process_list(db_type="mysql"):
     try:
-        db_type = connection['db_type']
-        if db_type == 'mysql':
-            db = mysql.connector.connect(
-                host=connection['host'],
-                port=connection['port'],
-                user=connection['username'],
-                password=connection['password'],
-                database=connection['database_name']
-            )
-            cursor = db.cursor()
+        host = os.getenv("MYSQL_HOST", "mysql_db") if db_type == "mysql" else os.getenv("POSTGRES_HOST", "postgres_db")
+        user = os.getenv("MYSQL_USER", "dbuser") if db_type == "mysql" else os.getenv("POSTGRES_USER", "pguser")
+        password = os.getenv("MYSQL_PASSWORD", "dbpass") if db_type == "mysql" else os.getenv("POSTGRES_PASSWORD", "pgpass")
+        database = "employees" if db_type == "mysql" else "itshield"
+        log_path = "/var/log/mysql/mysql.log" if db_type == "mysql" else "/var/log/postgres/postgres.log"
+
+        db = get_db_connection(db_type, host, user, password, database)
+        if not db:
+            return list(query_history), [], daily_query_stats
+
+        cursor = db.cursor() if db_type == "mysql" else db.cursor()
+
+        if db_type == "mysql":
+            cursor.execute("SET GLOBAL general_log = 'OFF';")
+            cursor.execute("SET GLOBAL general_log_file = '/var/log/mysql/mysql.log';")
+            cursor.execute("SET GLOBAL general_log = 'ON';")
+
             cursor.execute("SELECT @@hostname AS device_hostname;")
             hostname = cursor.fetchone()[0]
-            process_query = """
+
+            cursor.execute("""
                 SELECT ID, USER, HOST, DB, COMMAND, TIME, STATE
                 FROM INFORMATION_SCHEMA.PROCESSLIST;
-            """
-            log_path = "/var/log/mysql/mysql.log"
-        elif db_type == 'postgres':
-            db = psycopg2.connect(
-                host=connection['host'],
-                port=connection['port'],
-                user=connection['username'],
-                password=connection['password'],
-                dbname=connection['database_name']
-            )
-            cursor = db.cursor()
-            cursor.execute("SELECT inet_server_addr() AS device_hostname;")
-            hostname = cursor.fetchone()[0]
-            process_query = """
-                SELECT pid, usename, client_addr, datname, state, EXTRACT(EPOCH FROM (NOW() - query_start)) AS time, query
-                FROM pg_stat_activity WHERE state != 'idle';
-            """
-            log_path = "/var/log/postgres/postgres.log"
+            """)
+            processes = cursor.fetchall()
         else:
-            raise ValueError("Unsupported database type")
+            cursor.execute("SELECT inet_server_addr() AS device_hostname")
+            hostname = cursor.fetchone()[0] or "postgres_db"
 
-        print(f"Retrieved hostname: {hostname}")
-        cursor.execute(process_query)
-        processes = cursor.fetchall()
-        print(f"Retrieved {len(processes)} processes")
+            cursor.execute("""
+                SELECT pid, usename, application_name, client_addr, state, query
+                FROM pg_stat_activity
+                WHERE pid != pg_backend_pid();
+            """)
+            processes = [(row[0], row[1], row[3] or '', row[2], row[4], 0, row[5]) for row in cursor.fetchall()]
 
-        try:
-            log_entries = tailer.tail(open(log_path, 'r'), 100)
-            print(f"Read {len(log_entries)} log entries")
-            print("Raw log entries:", log_entries)
-        except FileNotFoundError:
-            print(f"Log file not found: {log_path}")
-            log_entries = []
+        log_entries = tailer.tail(open(log_path, 'r'), 100)
 
         query_logs = []
-        log_entry_pattern = re.compile(r'(?P<time>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{0,6}Z)\s+(?P<id>\d+)\s+Query\s+(?P<query>.*)')
-        non_query_pattern = re.compile(r'(?P<time>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{0,6}Z)\s+(?P<id>\d+)\s+(?P<command>Connect|Quit)\s+(?P<details>.*)')
+        log_entry_pattern = re.compile(
+            r'(?P<time>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z)\s+(?P<id>\d+)\s+Query\s+(?P<query>.*)' if db_type == "mysql"
+            else r'(?P<time>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}\s+UTC)\s+\[\d+\]\s+LOG:\s+statement:\s+(?P<query>.*)'
+        )
+        non_query_pattern = re.compile(
+            r'(?P<time>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z)\s+(?P<id>\d+)\s+(?P<command>Connect|Quit)\s+(?P<details>.*)' if db_type == "mysql"
+            else r'(?P<time>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}\s+UTC)\s+\[\d+\]\s+LOG:\s+(?P<command>connection\s+received|disconnection):.*'
+        )
 
         global last_emitted_query
         new_entries = []
@@ -113,7 +212,7 @@ def fetch_process_list(connection):
         for entry in log_entries:
             if entry in processed_queries:
                 continue
-            if "Query" in entry:
+            if "Query" in entry or (db_type == "postgres" and "LOG:  statement:" in entry):
                 if combined_query:
                     combined_query = combined_query.strip()
                     query_logs.append((hostname, combined_pid, combined_time, combined_query))
@@ -124,18 +223,17 @@ def fetch_process_list(connection):
 
                 match = log_entry_pattern.search(entry)
                 if match:
-                    time, pid, query = match.groups()
-                    print(f"Matched query: {query}")
-                    formatted_time = datetime.strptime(time, '%Y-%m-%dT%H:%M:%S.%fZ').strftime('%Y-%m-%d %H:%M:%S')
+                    time, query = match.group('time'), match.group('query')
+                    pid = match.group('id') if db_type == "mysql" else ""
+                    formatted_time = datetime.strptime(time, '%Y-%m-%dT%H:%M:%S.%fZ' if db_type == "mysql" else '%Y-%m-%d %H:%M:%S.%f UTC').strftime('%Y-%m-%d %H:%M:%S')
                     if is_excluded_query(query):
-                        print(f"Excluded query: {query}")
                         continue
                     processed_queries.add(entry)
                     combined_query = query
                     combined_time = formatted_time
                     combined_pid = pid
 
-                    query_date = datetime.strptime(time, '%Y-%m-%dT%H:%M:%S.%fZ').strftime('%Y-%m-%d')
+                    query_date = datetime.strptime(time, '%Y-%m-%dT%H:%M:%S.%fZ' if db_type == "mysql" else '%Y-%m-%d %H:%M:%S.%f UTC').strftime('%Y-%m-%d')
                     query_upper = query.upper()
                     if query_upper.startswith("SELECT"):
                         daily_query_stats[query_date]["SELECT"] += 1
@@ -165,7 +263,7 @@ def fetch_process_list(connection):
         for process in processes:
             pid = str(process[0])
             for log in new_entries:
-                if log[1] == pid:
+                if (db_type == "mysql" and log[1] == pid) or (db_type == "postgres"):
                     enhanced_data.append((hostname, *process, log[2], log[3]))
                     query_history.append((hostname, *process, log[2], log[3]))
 
@@ -179,9 +277,8 @@ def fetch_process_list(connection):
             if new_queries:
                 last_emitted_query = new_queries[-1]
 
-        print(f"Returning {len(query_history)} history items, {len(query_logs)} logs, {len(daily_query_stats)} stats")
         return list(query_history), query_logs, daily_query_stats
 
-    except (MySQLError, PostgresError, ValueError) as e:
-        print(f"Error during fetch or emit: {e}")
+    except (mysql.connector.Error, psycopg2.Error) as e:
+        print(f"Error during fetch or emit ({db_type}): {e}")
         return list(query_history), [], daily_query_stats

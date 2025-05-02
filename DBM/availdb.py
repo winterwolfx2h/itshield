@@ -1,43 +1,60 @@
 import mysql.connector
+from mysql.connector import Error
 import psycopg2
-from mysql.connector import Error as MySQLError
-from psycopg2 import Error as PostgresError
 from collections import defaultdict
 from utils import query_history, daily_query_stats
-from db_manager import get_connections
+import os
 
 def check_database_availability():
-    databases = get_connections()
+    databases = [
+        {
+            "type": "mysql",
+            "host": os.getenv("MYSQL_HOST", "mysql_db"),
+            "user": os.getenv("MYSQL_USER", "dbuser"),
+            "password": os.getenv("MYSQL_PASSWORD", "dbpass"),
+            "database": "employees"
+        },
+        {
+            "type": "postgres",
+            "host": os.getenv("POSTGRES_HOST", "postgres_db"),
+            "user": os.getenv("POSTGRES_USER", "pguser"),
+            "password": os.getenv("POSTGRES_PASSWORD", "pgpass"),
+            "database": "itshield"
+        }
+    ]
+
     availability_status = defaultdict(dict)
 
     for db in databases:
+        db_type = db["type"]
         db_host = db["host"]
-        db_name = db["database_name"]
+        db_name = db["database"]
+
         try:
-            if db["db_type"] == "mysql":
+            if db_type == "mysql":
                 connection = mysql.connector.connect(
-                    host=db["host"],
-                    port=db["port"],
-                    user=db["username"],
+                    host=db_host,
+                    user=db["user"],
                     password=db["password"],
-                    database=db["database_name"]
+                    database=db_name
                 )
-            elif db["db_type"] == "postgres":
+            else:
                 connection = psycopg2.connect(
-                    host=db["host"],
-                    port=db["port"],
-                    user=db["username"],
+                    host=db_host,
+                    user=db["user"],
                     password=db["password"],
-                    dbname=db["database_name"]
+                    database=db_name,
+                    port=5432
                 )
-            if (db["db_type"] == "mysql" and connection.is_connected()) or (db["db_type"] == "postgres"):
+
+            if (db_type == "mysql" and connection.is_connected()) or (db_type == "postgres"):
                 availability_status[db_host][db_name] = "Available"
                 connection.close()
             else:
                 availability_status[db_host][db_name] = "Unavailable"
-        except (MySQLError, PostgresError) as err:
+        except (mysql.connector.Error, psycopg2.Error) as err:
             availability_status[db_host][db_name] = f"Unavailable: {err}"
-            print(f"Error connecting to {db_host}/{db_name}: {err}")
+            print(f"Error connecting to {db_host}/{db_name} ({db_type}): {err}")
 
     return availability_status
 

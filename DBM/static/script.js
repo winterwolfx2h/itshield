@@ -1,21 +1,11 @@
 document.addEventListener('DOMContentLoaded', () => {
     const socket = io();
     const dataList = document.getElementById('data-list');
-    const dbSelect = document.getElementById('db_select');
+    const dbTypeSelect = document.getElementById('dbTypeSelect');
 
-    dbSelect.addEventListener('change', () => {
-        const connId = dbSelect.value;
-        if (connId) {
-            socket.emit('select_db', { conn_id: connId });
-            console.log('Selected database ID:', connId);
-        }
-    });
-
-    socket.on('realtime_data', function(data) {
-        console.log('Received realtime_data:', data);
+    function updateTable(data) {
         const newRows = document.createDocumentFragment();
         data.forEach(item => {
-            console.log('Processing item:', item);
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td>${item[0]}</td>
@@ -33,5 +23,26 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         dataList.innerHTML = '';
         dataList.appendChild(newRows);
+    }
+
+    socket.on('realtime_data_mysql', function(data) {
+        if (dbTypeSelect.value === 'mysql') {
+            updateTable(data);
+        }
+    });
+
+    socket.on('realtime_data_postgres', function(data) {
+        if (dbTypeSelect.value === 'postgres') {
+            updateTable(data);
+        }
+    });
+
+    dbTypeSelect.addEventListener('change', () => {
+        dataList.innerHTML = '';
+        socket.emit('request_data', dbTypeSelect.value);
+    });
+
+    socket.on('connect', () => {
+        socket.emit('request_data', dbTypeSelect.value);
     });
 });

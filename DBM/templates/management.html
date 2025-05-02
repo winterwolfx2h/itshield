@@ -45,6 +45,11 @@
                 </div>
                 <div class="form-group">
                     <form id="addDatabaseForm" action="{{ url_for('management.add_database') }}" method="post">
+                        <label for="type">Database Type:</label>
+                        <select class="form-control" id="type" name="type" required>
+                            <option value="mysql">MySQL</option>
+                            <option value="postgres">PostgreSQL</option>
+                        </select>
                         <label for="host">Host:</label>
                         <input type="text" class="form-control" id="host" name="host" required>
                         <label for="port">Port:</label>
@@ -63,19 +68,22 @@
                     <ul id="databasesList" class="list-group">
                         {% for db in databases %}
                         <li class="list-group-item d-flex justify-content-between align-items-center">
-                            <span>{{ db.host }}:{{ db.port }} - {{ db.database }}</span>
+                            <span>{{ db.type | capitalize }}: {{ db.host }}:{{ db.port }} - {{ db.database }}</span>
                             <div class="btn-group">
                                 <form action="{{ url_for('management.start_database') }}" method="post" class="mr-2">
+                                    <input type="hidden" name="type" value="{{ db.type }}">
                                     <input type="hidden" name="host" value="{{ db.host }}">
                                     <input type="hidden" name="port" value="{{ db.port }}">
                                     <button type="submit" class="btn btn-success btn-sm">Start</button>
                                 </form>
                                 <form action="{{ url_for('management.stop_database') }}" method="post" class="mr-2">
+                                    <input type="hidden" name="type" value="{{ db.type }}">
                                     <input type="hidden" name="host" value="{{ db.host }}">
                                     <input type="hidden" name="port" value="{{ db.port }}">
                                     <button type="submit" class="btn btn-danger btn-sm">Stop</button>
                                 </form>
                                 <form action="{{ url_for('management.restart_database') }}" method="post" class="mr-2">
+                                    <input type="hidden" name="type" value="{{ db.type }}">
                                     <input type="hidden" name="host" value="{{ db.host }}">
                                     <input type="hidden" name="port" value="{{ db.port }}">
                                     <button type="submit" class="btn btn-warning btn-sm">Restart</button>
