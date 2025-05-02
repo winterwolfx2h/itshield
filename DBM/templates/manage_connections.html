@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Manage Database Connections</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="sidebar">
+        <h2>ITShield</h2>
+        <ul>
+            <li><a href="/">Database Activity</a></li>
+            <li><a href="/dashboard/">Dashboard</a></li>
+            <li><a href="/manage_connections">Manage Connections</a></li>
+            <li><a href="/logout">Logout</a></li>
+        </ul>
+    </div>
+    <div class="content">
+        <h1>Manage Database Connections</h1>
+        <h2>Add New Connection</h2>
+        <form method="POST">
+            <label for="name">Connection Name:</label>
+            <input type="text" id="name" name="name" required><br>
+            <label for="db_type">Database Type:</label>
+            <select id="db_type" name="db_type" required>
+                <option value="mysql">MySQL</option>
+                <option value="postgres">PostgreSQL</option>
+            </select><br>
+            <label for="host">Host:</label>
+            <input type="text" id="host" name="host" required><br>
+            <label for="port">Port:</label>
+            <input type="number" id="port" name="port" required><br>
+            <label for="username">Username:</label>
+            <input type="text" id="username" name="username" required><br>
+            <label for="password">Password:</label>
+            <input type="password" id="password" name="password" required><br>
+            <label for="database_name">Database Name:</label>
+            <input type="text" id="database_name" name="database_name" required><br>
+            <button type="submit">Add Connection</button>
+        </form>
+        <h2>Saved Connections</h2>
+        <ul>
+            {% for conn in connections %}
+                <li>{{ conn.name }} ({{ conn.db_type }} - {{ conn.host }}:{{ conn.port }} - {{ conn.database_name }})</li>
+            {% endfor %}
+        </ul>
+    </div>
+</body>
+</html>

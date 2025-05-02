@@ -1,6 +1,15 @@
 document.addEventListener('DOMContentLoaded', () => {
     const socket = io();
     const dataList = document.getElementById('data-list');
+    const dbSelect = document.getElementById('db_select');
+
+    dbSelect.addEventListener('change', () => {
+        const connId = dbSelect.value;
+        if (connId) {
+            socket.emit('select_db', { conn_id: connId });
+            console.log('Selected database ID:', connId);
+        }
+    });
 
     socket.on('realtime_data', function(data) {
         console.log('Received realtime_data:', data);

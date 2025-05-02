@@ -11,3 +11,11 @@ seaborn
 tailer
 flask-login
 
+#Flask==2.2.5
+#Flask-SocketIO==5.3.6
+#mysql-connector-python==8.0.33
+psycopg2-binary==2.9.6
+python-socketio==5.8.0
+#tailer==0.4.1
+cryptography==41.0.3
+gunicorn==20.1.0

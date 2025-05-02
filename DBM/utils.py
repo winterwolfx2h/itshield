@@ -1,5 +1,7 @@
 import mysql.connector
-from mysql.connector import Error
+import psycopg2
+from mysql.connector import Error as MySQLError
+from psycopg2 import Error as PostgresError
 import tailer
 import re
 from collections import deque, defaultdict
@@ -9,8 +11,8 @@ import os
 # Use deque to maintain the last 100 queries
 query_history = deque(maxlen=100)
 daily_query_stats = defaultdict(lambda: defaultdict(int))
-processed_queries = set()  # Keep track of processed queries
-last_emitted_query = None  # Track the last emitted query
+processed_queries = set()
+last_emitted_query = None
 
 EXCLUDED_QUERIES = [
     "SELECT @@hostname AS device_hostname",
@@ -38,68 +40,6 @@ EXCLUDED_PREFIXES = [
     "SHOW"
 ]
 
-def fetch_database_performance(database):
-    performance_stats = defaultdict(int)
-
-    try:
-        db = mysql.connector.connect(
-            host="db",
-            user=os.getenv("MYSQL_USER", "dbuser"),
-            password=os.getenv("MYSQL_PASSWORD", "dbpass"),
-            database=database
-        )
-        cursor = db.cursor()
-
-        cursor.execute("SHOW GLOBAL STATUS LIKE 'Queries'")
-        result = cursor.fetchone()
-        performance_stats['queries'] = int(result[1]) if result else 0
-
-        cursor.execute("SHOW GLOBAL STATUS LIKE 'Connections'")
-        result = cursor.fetchone()
-        performance_stats['connections'] = int(result[1]) if result else 0
-
-        cursor.execute("SHOW GLOBAL STATUS LIKE 'Uptime'")
-        result = cursor.fetchone()
-        performance_stats['uptime'] = int(result[1]) if result else 0
-
-        cursor.close()
-        db.close()
-    except Error as e:
-        print(f"Error fetching performance data for {database}: {e}")
-
-    return performance_stats
-
-def fetch_database_status(database):
-    status_stats = defaultdict(int)
-
-    try:
-        db = mysql.connector.connect(
-            host="db",
-            user=os.getenv("MYSQL_USER", "dbuser"),
-            password=os.getenv("MYSQL_PASSWORD", "dbpass"),
-            database=database
-        )
-        cursor = db.cursor()
-
-        cursor.execute("SHOW STATUS LIKE 'Threads_connected'")
-        result = cursor.fetchone()
-        status_stats['threads_connected'] = int(result[1]) if result else 0
-
-        cursor.execute("SHOW STATUS LIKE 'Threads_running'")
-        result = cursor.fetchone()
-        status_stats['threads_running'] = int(result[1]) if result else 0
-
-        cursor.execute("SHOW STATUS LIKE 'Uptime'")
-        result = cursor.fetchone()
-        status_stats['uptime'] = int(result[1]) if result else 0
-
-        cursor.close()
-        db.close()
-    except Error as e:
-        print(f"Error fetching status data for {database}: {e}")
-
-    return status_stats
-
 def is_excluded_query(query):
     query_lower = query.lower()
     if any(query_lower == excluded_query.lower() for excluded_query in EXCLUDED_QUERIES):
@@ -108,28 +48,49 @@ def is_excluded_query(query):
         return True
     return False
 
-def fetch_process_list():
+def fetch_process_list(connection):
     try:
-        db = mysql.connector.connect(
-            host="db",
-            user=os.getenv("MYSQL_USER", "dbuser"),
-            password=os.getenv("MYSQL_PASSWORD", "dbpass"),
-            database="employees"
-        )
-        cursor = db.cursor()
+        db_type = connection['db_type']
+        if db_type == 'mysql':
+            db = mysql.connector.connect(
+                host=connection['host'],
+                port=connection['port'],
+                user=connection['username'],
+                password=connection['password'],
+                database=connection['database_name']
+            )
+            cursor = db.cursor()
+            cursor.execute("SELECT @@hostname AS device_hostname;")
+            hostname = cursor.fetchone()[0]
+            process_query = """
+                SELECT ID, USER, HOST, DB, COMMAND, TIME, STATE
+                FROM INFORMATION_SCHEMA.PROCESSLIST;
+            """
+            log_path = "/var/log/mysql/mysql.log"
+        elif db_type == 'postgres':
+            db = psycopg2.connect(
+                host=connection['host'],
+                port=connection['port'],
+                user=connection['username'],
+                password=connection['password'],
+                dbname=connection['database_name']
+            )
+            cursor = db.cursor()
+            cursor.execute("SELECT inet_server_addr() AS device_hostname;")
+            hostname = cursor.fetchone()[0]
+            process_query = """
+                SELECT pid, usename, client_addr, datname, state, EXTRACT(EPOCH FROM (NOW() - query_start)) AS time, query
+                FROM pg_stat_activity WHERE state != 'idle';
+            """
+            log_path = "/var/log/postgres/postgres.log"
+        else:
+            raise ValueError("Unsupported database type")
 
-        cursor.execute("SELECT @@hostname AS device_hostname;")
-        hostname = cursor.fetchone()[0]
         print(f"Retrieved hostname: {hostname}")
-
-        cursor.execute("""
-            SELECT ID, USER, HOST, DB, COMMAND, TIME, STATE
-            FROM INFORMATION_SCHEMA.PROCESSLIST;
-        """)
+        cursor.execute(process_query)
         processes = cursor.fetchall()
         print(f"Retrieved {len(processes)} processes")
 
-        log_path = "/var/log/mysql/mysql.log"
         try:
             log_entries = tailer.tail(open(log_path, 'r'), 100)
             print(f"Read {len(log_entries)} log entries")
@@ -139,8 +100,8 @@ def fetch_process_list():
             log_entries = []
 
         query_logs = []
-        log_entry_pattern = re.compile(r'(?P<time>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z)\s+(?P<id>\d+)\s+Query\s+(?P<query>.*)')
-        non_query_pattern = re.compile(r'(?P<time>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z)\s+(?P<id>\d+)\s+(?P<command>Connect|Quit)\s+(?P<details>.*)')
+        log_entry_pattern = re.compile(r'(?P<time>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{0,6}Z)\s+(?P<id>\d+)\s+Query\s+(?P<query>.*)')
+        non_query_pattern = re.compile(r'(?P<time>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{0,6}Z)\s+(?P<id>\d+)\s+(?P<command>Connect|Quit)\s+(?P<details>.*)')
 
         global last_emitted_query
         new_entries = []
@@ -221,6 +182,6 @@ def fetch_process_list():
         print(f"Returning {len(query_history)} history items, {len(query_logs)} logs, {len(daily_query_stats)} stats")
         return list(query_history), query_logs, daily_query_stats
 
-    except Error as e:
+    except (MySQLError, PostgresError, ValueError) as e:
         print(f"Error during fetch or emit: {e}")
         return list(query_history), [], daily_query_stats
