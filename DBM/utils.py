@@ -4,6 +4,7 @@ import tailer
 import re
 from collections import deque, defaultdict
 from datetime import datetime
+import os
 
 # Use deque to maintain the last 100 queries
 query_history = deque(maxlen=100)
@@ -41,10 +42,10 @@ def fetch_database_performance(database):
 
     try:
         db = mysql.connector.connect(
-            host="192.168.71.132",  # Update with your Linux MySQL server IP
-            user="dbmuser",
-            password="Root@12345",
-            database="employees"
+            host="db",
+            user=os.getenv("MYSQL_USER", "dbuser"),
+            password=os.getenv("MYSQL_PASSWORD", "dbpass"),
+            database=database
         )
         cursor = db.cursor()
 
@@ -72,10 +73,10 @@ def fetch_database_status(database):
 
     try:
         db = mysql.connector.connect(
-            host="192.168.71.132",
-            user="dbmuser",
-            password="Root@12345",
-            database="employees"
+            host="db",
+            user=os.getenv("MYSQL_USER", "dbuser"),
+            password=os.getenv("MYSQL_PASSWORD", "dbpass"),
+            database=database
         )
         cursor = db.cursor()
 
@@ -109,9 +110,9 @@ def is_excluded_query(query):
 def fetch_process_list():
     try:
         db = mysql.connector.connect(
-            host="192.168.71.132",
-            user="dbmuser",
-            password="Root@12345",
+            host="db",
+            user=os.getenv("MYSQL_USER", "dbuser"),
+            password=os.getenv("MYSQL_PASSWORD", "dbpass"),
             database="employees"
         )
         cursor = db.cursor()
@@ -122,15 +123,22 @@ def fetch_process_list():
 
         cursor.execute("SELECT @@hostname AS device_hostname;")
         hostname = cursor.fetchone()[0]
+        print(f"Retrieved hostname: {hostname}")
 
         cursor.execute("""
             SELECT ID, USER, HOST, DB, COMMAND, TIME, STATE
             FROM INFORMATION_SCHEMA.PROCESSLIST;
         """)
         processes = cursor.fetchall()
+        print(f"Retrieved {len(processes)} processes")
 
         log_path = "/var/log/mysql/mysql.log"
-        log_entries = tailer.tail(open(log_path, 'r'), 100)
+        try:
+            log_entries = tailer.tail(open(log_path, 'r'), 100)
+            print(f"Read {len(log_entries)} log entries")
+        except FileNotFoundError:
+            print(f"Log file not found: {log_path}")
+            log_entries = []
 
         query_logs = []
         log_entry_pattern = re.compile(r'(?P<time>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z)\s+(?P<id>\d+)\s+Query\s+(?P<query>.*)')
@@ -210,9 +218,9 @@ def fetch_process_list():
             if new_queries:
                 last_emitted_query = new_queries[-1]
 
+        print(f"Returning {len(query_history)} history items, {len(query_logs)} logs, {len(daily_query_stats)} stats")
         return list(query_history), query_logs, daily_query_stats
 
     except Error as e:
         print(f"Error during fetch or emit: {e}")
         return list(query_history), [], daily_query_stats
-

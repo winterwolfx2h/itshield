@@ -3,8 +3,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const dataList = document.getElementById('data-list');
 
     socket.on('realtime_data', function(data) {
+        console.log('Received realtime_data:', data);
         const newRows = document.createDocumentFragment();
         data.forEach(item => {
+            console.log('Processing item:', item);
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td>${item[0]}</td>
