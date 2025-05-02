@@ -18,8 +18,10 @@ services:
       - POSTGRES_PASSWORD=pgpass
     container_name: itshield_app
     depends_on:
-      - mysql_db
-      - postgres_db
+      mysql_db:
+        condition: service_healthy
+      postgres_db:
+        condition: service_healthy
     networks:
       - app-network
 
@@ -38,6 +40,11 @@ services:
       - mysql_logs:/var/log/mysql
       - ./my.cnf:/etc/mysql/my.cnf
     command: --general-log=1 --general_log_file=/var/log/mysql/mysql.log
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "dbuser", "-pdbpass"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - app-network
 
@@ -53,6 +60,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - postgres_logs:/var/log/postgres
+      - ./init-postgres.sql:/docker-entrypoint-initdb.d/init.sql
     command: >
       -c log_statement=all
       -c log_destination=stderr
@@ -61,6 +69,11 @@ services:
       -c log_filename=postgres.log
     depends_on:
       - postgres_init
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pguser -d itshield"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - app-network
 

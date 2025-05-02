@@ -1,5 +1,9 @@
 document.addEventListener('DOMContentLoaded', () => {
-    const socket = io();
+    const socket = io({
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000
+    });
     const dataList = document.getElementById('data-list');
     const dbTypeSelect = document.getElementById('dbTypeSelect');
 
@@ -43,6 +47,15 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     socket.on('connect', () => {
+        console.log('Socket connected:', socket.id);
         socket.emit('request_data', dbTypeSelect.value);
+    });
+
+    socket.on('disconnect', () => {
+        console.log('Socket disconnected');
+    });
+
+    socket.on('connect_error', (error) => {
+        console.error('Socket connection error:', error);
     });
 });
