@@ -19,6 +19,7 @@ EXCLUDED_QUERIES = [
     "SET GLOBAL general_log = 'OFF'",
     "SET GLOBAL general_log_file",
     "SET GLOBAL general_log = 'ON'",
+    "SET @@session.autocommit = OFF",
     "SET autocommit=0",
     "SELECT st.* FROM performance_schema.events_waits_history_long st",
     "SET NAMES utf8mb4",
@@ -117,10 +118,6 @@ def fetch_process_list():
         )
         cursor = db.cursor()
 
-        cursor.execute("SET GLOBAL general_log = 'OFF';")
-        cursor.execute("SET GLOBAL general_log_file = '/var/log/mysql/mysql.log';")
-        cursor.execute("SET GLOBAL general_log = 'ON';")
-
         cursor.execute("SELECT @@hostname AS device_hostname;")
         hostname = cursor.fetchone()[0]
         print(f"Retrieved hostname: {hostname}")
@@ -136,6 +133,7 @@ def fetch_process_list():
         try:
             log_entries = tailer.tail(open(log_path, 'r'), 100)
             print(f"Read {len(log_entries)} log entries")
+            print("Raw log entries:", log_entries)
         except FileNotFoundError:
             print(f"Log file not found: {log_path}")
             log_entries = []
@@ -166,8 +164,10 @@ def fetch_process_list():
                 match = log_entry_pattern.search(entry)
                 if match:
                     time, pid, query = match.groups()
+                    print(f"Matched query: {query}")
                     formatted_time = datetime.strptime(time, '%Y-%m-%dT%H:%M:%S.%fZ').strftime('%Y-%m-%d %H:%M:%S')
                     if is_excluded_query(query):
+                        print(f"Excluded query: {query}")
                         continue
                     processed_queries.add(entry)
                     combined_query = query
