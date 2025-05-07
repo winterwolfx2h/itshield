@@ -1,18 +1,12 @@
-FROM python:3.12-slim
-
-
-RUN apt-get update && apt-get install -y 
-#gcc 
-#libpq-dev 
-#libevent-dev 
-#&& rm -rf /var/lib/apt/lists/*
+FROM python:3.9-slim
 
 WORKDIR /app
 
-COPY . /app
-
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
 
 EXPOSE 5000
 
-CMD ["gunicorn", "--worker-class", "gevent", "--workers", "2", "--timeout", "120", "--bind", "0.0.0.0:5000", "app:app"]
+CMD ["gunicorn", "--worker-class", "gevent", "--workers", "3", "--bind", "0.0.0.0:5000", "--timeout", "120", "app:app"]

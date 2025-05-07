@@ -1,7 +1,6 @@
 services:
   app:
-    build:
-      context: DBM
+    image: 2b4cba85892a/dbm:v4
     ports:
       - "5000:5000"
     volumes:
