@@ -42,6 +42,7 @@ EXCLUDED_PREFIXES = [
 def get_db_connection(db_type, host, user, password, database):
     try:
         if db_type == "mysql":
+            print(f"Connecting to MySQL: {host}/{database}")
             return mysql.connector.connect(
                 host=host,
                 user=user,
@@ -49,6 +50,7 @@ def get_db_connection(db_type, host, user, password, database):
                 database=database
             )
         elif db_type == "postgres":
+            print(f"Connecting to PostgreSQL: {host}/{database}")
             return psycopg2.connect(
                 host=host,
                 user=user,
@@ -57,7 +59,7 @@ def get_db_connection(db_type, host, user, password, database):
                 port=5432
             )
     except (mysql.connector.Error, psycopg2.Error) as e:
-        print(f"Error connecting to {db_type} database: {e}")
+        print(f"Error connecting to {db_type} database {host}/{database}: {e}")
         return None
     return None
 
@@ -71,6 +73,7 @@ def fetch_database_performance(database, db_type="mysql"):
     try:
         db = get_db_connection(db_type, host, user, password, db_name)
         if not db:
+            print(f"No connection for {db_type} performance stats: {db_name}")
             return performance_stats
 
         cursor = db.cursor() if db_type == "mysql" else db.cursor()
@@ -111,6 +114,7 @@ def fetch_database_status(database, db_type="mysql"):
     try:
         db = get_db_connection(db_type, host, user, password, db_name)
         if not db:
+            print(f"No connection for {db_type} status stats: {db_name}")
             return status_stats
 
         cursor = db.cursor() if db_type == "mysql" else db.cursor()
@@ -160,8 +164,14 @@ def fetch_process_list(db_type="mysql"):
         database = "employees" if db_type == "mysql" else "itshield"
         log_path = "/var/log/mysql/mysql.log" if db_type == "mysql" else "/var/log/postgres/postgres.log"
 
+        print(f"Fetching process list for {db_type} at {log_path}")
+        if not os.path.exists(log_path):
+            print(f"Log file {log_path} does not exist")
+            return list(query_history), [], daily_query_stats
+
         db = get_db_connection(db_type, host, user, password, database)
         if not db:
+            print(f"Failed to connect to {db_type} database {host}/{database}")
             return list(query_history), [], daily_query_stats
 
         cursor = db.cursor() if db_type == "mysql" else db.cursor()
@@ -191,6 +201,7 @@ def fetch_process_list(db_type="mysql"):
             processes = [(row[0], row[1], row[3] or '', row[2], row[4], 0, row[5]) for row in cursor.fetchall()]
 
         log_entries = tailer.tail(open(log_path, 'r'), 100)
+        print(f"Read {len(log_entries)} log entries from {log_path}")
 
         query_logs = []
         log_entry_pattern = re.compile(
@@ -277,8 +288,9 @@ def fetch_process_list(db_type="mysql"):
             if new_queries:
                 last_emitted_query = new_queries[-1]
 
+        print(f"Returning {db_type} data: {len(enhanced_data)} enhanced, {len(query_logs)} logs")
         return list(query_history), query_logs, daily_query_stats
 
-    except (mysql.connector.Error, psycopg2.Error) as e:
-        print(f"Error during fetch or emit ({db_type}): {e}")
+    except (mysql.connector.Error, psycopg2.Error, OSError) as e:
+        print(f"Error during fetch or emit for {db_type}: {e}")
         return list(query_history), [], daily_query_stats

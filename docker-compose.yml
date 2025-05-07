@@ -39,6 +39,7 @@ services:
       - mysql_data:/var/lib/mysql
       - mysql_logs:/var/log/mysql
       - ./my.cnf:/etc/mysql/my.cnf
+      - ./init-mysql.sh:/docker-entrypoint-initdb.d/init.sh
     command: --general-log=1 --general_log_file=/var/log/mysql/mysql.log
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "dbuser", "-pdbpass"]

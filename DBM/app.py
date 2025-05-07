@@ -80,18 +80,20 @@ def background_task():
         try:
             # Fetch MySQL data
             mysql_data, mysql_logs, mysql_stats = fetch_process_list(db_type="mysql")
+            print(f"Emitting MySQL data: {len(mysql_data)} entries, {len(mysql_logs)} logs")
             socketio.emit('realtime_data_mysql', mysql_data)
             socketio.emit('query_logs_mysql', mysql_logs)
             socketio.emit('daily_query_stats_mysql', mysql_stats)
 
             # Fetch PostgreSQL data
             postgres_data, postgres_logs, postgres_stats = fetch_process_list(db_type="postgres")
+            print(f"Emitting PostgreSQL data: {len(postgres_data)} entries, {len(postgres_logs)} logs")
             socketio.emit('realtime_data_postgres', postgres_data)
             socketio.emit('query_logs_postgres', postgres_logs)
             socketio.emit('daily_query_stats_postgres', postgres_stats)
         except Exception as e:
-            print("Error during fetch or emit:", e)
-        socketio.sleep(1)
+            print(f"Error during fetch or emit: {e}")
+        socketio.sleep(2)  # Increase to 2 seconds to reduce load
 
 def database_availability_task():
     while True:
@@ -99,8 +101,8 @@ def database_availability_task():
             _, availability_status, _ = fetch_database_availability()
             socketio.emit('db_availability', availability_status)
         except Exception as e:
-            print("Error during fetch or emit:", e)
-        socketio.sleep(1)
+            print(f"Error during fetch or emit: {e}")
+        socketio.sleep(2)
 
 def performance_task():
     while True:
@@ -113,8 +115,18 @@ def performance_task():
             }
             socketio.emit('realtime_performance', performance_stats)
         except Exception as e:
-            print("Error during fetch or emit:", e)
+            print(f"Error during fetch or emit: {e}")
         socketio.sleep(5)
+
+@socketio.on('request_data')
+def handle_request_data(db_type):
+    try:
+        print(f"Received request_data for {db_type}")
+        data, logs, stats = fetch_process_list(db_type=db_type)
+        socketio.emit('initial_data', {'dbType': db_type, 'data': data})
+        print(f"Sent initial_data for {db_type}: {len(data)} entries")
+    except Exception as e:
+        print(f"Error handling request_data for {db_type}: {e}")
 
 socketio.start_background_task(target=background_task)
 socketio.start_background_task(target=database_availability_task)

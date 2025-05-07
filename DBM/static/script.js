@@ -6,8 +6,11 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     const dataList = document.getElementById('data-list');
     const dbTypeSelect = document.getElementById('dbTypeSelect');
+    let lastDbType = dbTypeSelect.value;
 
-    function updateTable(data) {
+    function updateTable(data, dbType) {
+        console.log(`Updating table for ${dbType} with ${data.length} entries`);
+        dataList.innerHTML = ''; // Clear table to prevent stale data
         const newRows = document.createDocumentFragment();
         data.forEach(item => {
             const row = document.createElement('tr');
@@ -25,30 +28,38 @@ document.addEventListener('DOMContentLoaded', () => {
             `;
             newRows.appendChild(row);
         });
-        dataList.innerHTML = '';
         dataList.appendChild(newRows);
     }
 
     socket.on('realtime_data_mysql', function(data) {
+        console.log(`Received realtime_data_mysql, current dbType: ${dbTypeSelect.value}`);
         if (dbTypeSelect.value === 'mysql') {
-            updateTable(data);
+            updateTable(data, 'mysql');
         }
     });
 
     socket.on('realtime_data_postgres', function(data) {
+        console.log(`Received realtime_data_postgres, current dbType: ${dbTypeSelect.value}`);
         if (dbTypeSelect.value === 'postgres') {
-            updateTable(data);
+            updateTable(data, 'postgres');
         }
     });
 
+    // Debounce dropdown change to prevent rapid emissions
+    let debounceTimeout;
     dbTypeSelect.addEventListener('change', () => {
-        dataList.innerHTML = '';
-        socket.emit('request_data', dbTypeSelect.value);
+        clearTimeout(debounceTimeout);
+        debounceTimeout = setTimeout(() => {
+            lastDbType = dbTypeSelect.value;
+            console.log(`Dropdown changed to ${lastDbType}, requesting data`);
+            dataList.innerHTML = ''; // Clear table on change
+            socket.emit('request_data', lastDbType);
+        }, 300);
     });
 
     socket.on('connect', () => {
         console.log('Socket connected:', socket.id);
-        socket.emit('request_data', dbTypeSelect.value);
+        socket.emit('request_data', lastDbType);
     });
 
     socket.on('disconnect', () => {
@@ -57,5 +68,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     socket.on('connect_error', (error) => {
         console.error('Socket connection error:', error);
+    });
+
+    // Handle server response to request_data
+    socket.on('initial_data', (data) => {
+        console.log(`Received initial_data for ${data.dbType}`);
+        if (data.dbType === dbTypeSelect.value) {
+            updateTable(data.data, data.dbType);
+        }
     });
 });
