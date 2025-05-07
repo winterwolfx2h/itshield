@@ -21,7 +21,8 @@ document.addEventListener('DOMContentLoaded', function () {
             statusList.className = 'list-group list-group-flush';
 
             for (const db in hostStatus) {
-                const status = hostStatus[db];
+                const statusObj = hostStatus[db];
+                const status = statusObj.status === 'online' ? 'Available' : 'Unavailable';
                 const statusItem = document.createElement('li');
                 statusItem.className = 'list-group-item d-flex justify-content-between align-items-center';
                 statusItem.textContent = db;

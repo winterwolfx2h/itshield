@@ -6,25 +6,29 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     const dataList = document.getElementById('data-list');
     const dbTypeSelect = document.getElementById('dbTypeSelect');
-    let lastDbType = dbTypeSelect.value;
+    let currentDbType = dbTypeSelect.value;
 
     function updateTable(data, dbType) {
-        console.log(`Updating table for ${dbType} with ${data.length} entries`);
+        if (dbType !== currentDbType) {
+            console.log(`Ignoring data for ${dbType}, currentDbType is ${currentDbType}`);
+            return;
+        }
+        console.log(`Updating table for ${dbType} with ${data.length} entries, raw data:`, data);
         dataList.innerHTML = ''; // Clear table to prevent stale data
         const newRows = document.createDocumentFragment();
         data.forEach(item => {
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td>${item[0]}</td>
-                <td>${item[1]}</td>
-                <td>${item[2]}</td>
-                <td>${item[3]}</td>
-                <td>${item[4]}</td>
-                <td>${item[5]}</td>
-                <td>${item[6]}</td>
-                <td>${item[7]}</td>
-                <td>${item[8]}</td>
-                <td>${item[9].replace(/\n/g, "<br>")}</td>
+                <td>${item[0] || 'N/A'}</td>
+                <td>${item[1] || 'N/A'}</td>
+                <td>${item[2] || 'N/A'}</td>
+                <td>${item[3] || 'N/A'}</td>
+                <td>${item[4] || 'N/A'}</td>
+                <td>${item[5] || 'N/A'}</td>
+                <td>${item[6] || 'N/A'}</td>
+                <td>${item[7] || 'N/A'}</td>
+                <td>${item[8] || 'N/A'}</td>
+                <td>${(item[9] || '').replace(/\n/g, "<br>")}</td>
             `;
             newRows.appendChild(row);
         });
@@ -32,15 +36,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     socket.on('realtime_data_mysql', function(data) {
-        console.log(`Received realtime_data_mysql, current dbType: ${dbTypeSelect.value}`);
-        if (dbTypeSelect.value === 'mysql') {
+        console.log(`Received realtime_data_mysql, currentDbType: ${currentDbType}, data length: ${data.length}, raw data:`, data);
+        if (currentDbType === 'mysql') {
             updateTable(data, 'mysql');
         }
     });
 
     socket.on('realtime_data_postgres', function(data) {
-        console.log(`Received realtime_data_postgres, current dbType: ${dbTypeSelect.value}`);
-        if (dbTypeSelect.value === 'postgres') {
+        console.log(`Received realtime_data_postgres, currentDbType: ${currentDbType}, data length: ${data.length}, raw data:`, data);
+        if (currentDbType === 'postgres') {
             updateTable(data, 'postgres');
         }
     });
@@ -50,16 +54,16 @@ document.addEventListener('DOMContentLoaded', () => {
     dbTypeSelect.addEventListener('change', () => {
         clearTimeout(debounceTimeout);
         debounceTimeout = setTimeout(() => {
-            lastDbType = dbTypeSelect.value;
-            console.log(`Dropdown changed to ${lastDbType}, requesting data`);
+            currentDbType = dbTypeSelect.value;
+            console.log(`Dropdown changed to ${currentDbType}, requesting data`);
             dataList.innerHTML = ''; // Clear table on change
-            socket.emit('request_data', lastDbType);
+            socket.emit('request_data', currentDbType);
         }, 300);
     });
 
     socket.on('connect', () => {
         console.log('Socket connected:', socket.id);
-        socket.emit('request_data', lastDbType);
+        socket.emit('request_data', currentDbType);
     });
 
     socket.on('disconnect', () => {
@@ -70,10 +74,9 @@ document.addEventListener('DOMContentLoaded', () => {
         console.error('Socket connection error:', error);
     });
 
-    // Handle server response to request_data
     socket.on('initial_data', (data) => {
-        console.log(`Received initial_data for ${data.dbType}`);
-        if (data.dbType === dbTypeSelect.value) {
+        console.log(`Received initial_data for ${data.dbType}, currentDbType: ${currentDbType}, data length: ${data.data.length}, raw data:`, data.data);
+        if (data.dbType === currentDbType) {
             updateTable(data.data, data.dbType);
         }
     });

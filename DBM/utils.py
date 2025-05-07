@@ -7,11 +7,16 @@ from collections import deque, defaultdict
 from datetime import datetime
 import os
 
-# Use deque to maintain the last 100 queries
-query_history = deque(maxlen=100)
+# Separate query histories and logs for MySQL and PostgreSQL
+mysql_query_history = deque(maxlen=100)
+postgres_query_history = deque(maxlen=100)
+mysql_query_logs = deque(maxlen=100)
+postgres_query_logs = deque(maxlen=100)
 daily_query_stats = defaultdict(lambda: defaultdict(int))
-processed_queries = set()  # Keep track of processed queries
-last_emitted_query = None  # Track the last emitted query
+mysql_processed_queries = set()
+postgres_processed_queries = set()
+mysql_last_emitted_query = None
+postgres_last_emitted_query = None
 
 EXCLUDED_QUERIES = [
     "SELECT @@hostname AS device_hostname",
@@ -157,6 +162,7 @@ def is_excluded_query(query):
     return False
 
 def fetch_process_list(db_type="mysql"):
+    global mysql_last_emitted_query, postgres_last_emitted_query
     try:
         host = os.getenv("MYSQL_HOST", "mysql_db") if db_type == "mysql" else os.getenv("POSTGRES_HOST", "postgres_db")
         user = os.getenv("MYSQL_USER", "dbuser") if db_type == "mysql" else os.getenv("POSTGRES_USER", "pguser")
@@ -164,15 +170,19 @@ def fetch_process_list(db_type="mysql"):
         database = "employees" if db_type == "mysql" else "itshield"
         log_path = "/var/log/mysql/mysql.log" if db_type == "mysql" else "/var/log/postgres/postgres.log"
 
+        query_history = mysql_query_history if db_type == "mysql" else postgres_query_history
+        query_logs = mysql_query_logs if db_type == "mysql" else postgres_query_logs
+        processed_queries = mysql_processed_queries if db_type == "mysql" else postgres_processed_queries
+
         print(f"Fetching process list for {db_type} at {log_path}")
         if not os.path.exists(log_path):
             print(f"Log file {log_path} does not exist")
-            return list(query_history), [], daily_query_stats
+            return list(query_history), list(query_logs), daily_query_stats
 
         db = get_db_connection(db_type, host, user, password, database)
         if not db:
             print(f"Failed to connect to {db_type} database {host}/{database}")
-            return list(query_history), [], daily_query_stats
+            return list(query_history), list(query_logs), daily_query_stats
 
         cursor = db.cursor() if db_type == "mysql" else db.cursor()
 
@@ -203,7 +213,6 @@ def fetch_process_list(db_type="mysql"):
         log_entries = tailer.tail(open(log_path, 'r'), 100)
         print(f"Read {len(log_entries)} log entries from {log_path}")
 
-        query_logs = []
         log_entry_pattern = re.compile(
             r'(?P<time>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z)\s+(?P<id>\d+)\s+Query\s+(?P<query>.*)' if db_type == "mysql"
             else r'(?P<time>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}\s+UTC)\s+\[\d+\]\s+LOG:\s+statement:\s+(?P<query>.*)'
@@ -213,9 +222,7 @@ def fetch_process_list(db_type="mysql"):
             else r'(?P<time>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}\s+UTC)\s+\[\d+\]\s+LOG:\s+(?P<command>connection\s+received|disconnection):.*'
         )
 
-        global last_emitted_query
         new_entries = []
-
         combined_query = ""
         combined_time = ""
         combined_pid = ""
@@ -271,26 +278,44 @@ def fetch_process_list(db_type="mysql"):
             new_entries.append((hostname, combined_pid, combined_time, combined_query))
 
         enhanced_data = []
+        print(f"Found {len(processes)} processes and {len(new_entries)} new log entries")
         for process in processes:
             pid = str(process[0])
+            matched = False
             for log in new_entries:
-                if (db_type == "mysql" and log[1] == pid) or (db_type == "postgres"):
+                process_pid = str(process[0]) if db_type == "mysql" else str(process[0])
+                if (db_type == "mysql" and log[1] == process_pid) or (db_type == "postgres" and process[5] == log[3]):  # Match by PID for MySQL, query for PostgreSQL
                     enhanced_data.append((hostname, *process, log[2], log[3]))
                     query_history.append((hostname, *process, log[2], log[3]))
+                    matched = True
+                    break
+            if not matched and db_type == "mysql" and new_entries:  # Fallback for MySQL: include latest log entry
+                latest_log = new_entries[-1]
+                enhanced_data.append((hostname, *process, latest_log[2], latest_log[3]))
+                query_history.append((hostname, *process, latest_log[2], latest_log[3]))
 
         cursor.close()
         db.close()
 
-        if last_emitted_query is None:
-            last_emitted_query = query_logs[-1] if query_logs else None
+        # Update last emitted query
+        if db_type == "mysql":
+            if mysql_last_emitted_query is None and query_logs:
+                mysql_last_emitted_query = query_logs[-1]
+            else:
+                new_queries = [log for log in query_logs if log > mysql_last_emitted_query] if mysql_last_emitted_query else query_logs
+                if new_queries:
+                    mysql_last_emitted_query = new_queries[-1]
         else:
-            new_queries = [log for log in query_logs if log > last_emitted_query]
-            if new_queries:
-                last_emitted_query = new_queries[-1]
+            if postgres_last_emitted_query is None and query_logs:
+                postgres_last_emitted_query = query_logs[-1]
+            else:
+                new_queries = [log for log in query_logs if log > postgres_last_emitted_query] if postgres_last_emitted_query else query_logs
+                if new_queries:
+                    postgres_last_emitted_query = new_queries[-1]
 
         print(f"Returning {db_type} data: {len(enhanced_data)} enhanced, {len(query_logs)} logs")
-        return list(query_history), query_logs, daily_query_stats
+        return enhanced_data, list(query_logs), daily_query_stats
 
     except (mysql.connector.Error, psycopg2.Error, OSError) as e:
         print(f"Error during fetch or emit for {db_type}: {e}")
-        return list(query_history), [], daily_query_stats
+        return list(query_history), list(query_logs), daily_query_stats

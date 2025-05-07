@@ -17,13 +17,31 @@ def monitor():
 @dashboard_bp.route('/')
 def dashboard():
     try:
-        query_history, query_logs, daily_query_stats = fetch_process_list()
+        # Fetch MySQL and PostgreSQL data
+        mysql_query_history, mysql_query_logs, mysql_daily_query_stats = fetch_process_list(db_type="mysql")
+        postgres_query_history, postgres_query_logs, postgres_daily_query_stats = fetch_process_list(db_type="postgres")
+        
+        # Combine query history
+        query_history = mysql_query_history + postgres_query_history
+        
+        # Aggregate host stats
         host_stats = {}
         for record in query_history:
             hostname = record[0]
             host_stats[hostname] = host_stats.get(hostname, 0) + 1
-
-        total_queries = {cmd: sum(daily_query_stats[day].get(cmd, 0) for day in daily_query_stats) for cmd in ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP']}
+        
+        # Combine daily query stats
+        daily_query_stats = {}
+        for date in set(mysql_daily_query_stats.keys()) | set(postgres_daily_query_stats.keys()):
+            daily_query_stats[date] = {}
+            for cmd in ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP']:
+                daily_query_stats[date][cmd] = (mysql_daily_query_stats.get(date, {}).get(cmd, 0) + 
+                                               postgres_daily_query_stats.get(date, {}).get(cmd, 0))
+        
+        total_queries = {cmd: sum(daily_query_stats[day].get(cmd, 0) for day in daily_query_stats) 
+                        for cmd in ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP']}
+        
+        print(f"Dashboard: host_stats={host_stats}, total_queries={total_queries}")
         return render_template('dashboard.html', host_stats=host_stats, total_queries=total_queries)
 
     except Error as e:
@@ -33,11 +51,18 @@ def dashboard():
 @dashboard_bp.route('/host_stats.png')
 def host_stats_chart():
     try:
-        query_history, _, _ = fetch_process_list()
+        mysql_query_history, _, _ = fetch_process_list(db_type="mysql")
+        postgres_query_history, _, _ = fetch_process_list(db_type="postgres")
+        query_history = mysql_query_history + postgres_query_history
+        
         host_stats = {}
         for record in query_history:
             hostname = record[0]
             host_stats[hostname] = host_stats.get(hostname, 0) + 1
+
+        if not host_stats:
+            print("No host stats data available")
+            return send_file(io.BytesIO(), mimetype='image/png')
 
         sns.set(style="whitegrid")
         fig, ax = plt.subplots()
@@ -64,8 +89,22 @@ def host_stats_chart():
 @dashboard_bp.route('/query_stats.png')
 def query_stats_chart():
     try:
-        _, _, daily_query_stats = fetch_process_list()
-        total_queries = {cmd: sum(daily_query_stats[day].get(cmd, 0) for day in daily_query_stats) for cmd in ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP']}
+        _, _, mysql_daily_query_stats = fetch_process_list(db_type="mysql")
+        _, _, postgres_daily_query_stats = fetch_process_list(db_type="postgres")
+        
+        daily_query_stats = {}
+        for date in set(mysql_daily_query_stats.keys()) | set(postgres_daily_query_stats.keys()):
+            daily_query_stats[date] = {}
+            for cmd in ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP']:
+                daily_query_stats[date][cmd] = (mysql_daily_query_stats.get(date, {}).get(cmd, 0) + 
+                                               postgres_daily_query_stats.get(date, {}).get(cmd, 0))
+        
+        total_queries = {cmd: sum(daily_query_stats[day].get(cmd, 0) for day in daily_query_stats) 
+                        for cmd in ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP']}
+        
+        if not total_queries:
+            print("No query stats data available")
+            return send_file(io.BytesIO(), mimetype='image/png')
         
         sns.set(style="whitegrid")
         fig, ax = plt.subplots(figsize=(6, 6))
@@ -88,7 +127,10 @@ def query_stats_chart():
 @dashboard_bp.route('/query_history')
 def query_history_data():
     try:
-        query_history, _, _ = fetch_process_list()
+        mysql_query_history, _, _ = fetch_process_list(db_type="mysql")
+        postgres_query_history, _, _ = fetch_process_list(db_type="postgres")
+        query_history = mysql_query_history + postgres_query_history
+        print(f"Query history: {len(query_history)} records")
         return jsonify(query_history)
 
     except Error as e:
@@ -98,7 +140,17 @@ def query_history_data():
 @dashboard_bp.route('/query_stats')
 def query_stats_data():
     try:
-        _, _, daily_query_stats = fetch_process_list()
+        _, _, mysql_daily_query_stats = fetch_process_list(db_type="mysql")
+        _, _, postgres_daily_query_stats = fetch_process_list(db_type="postgres")
+        
+        daily_query_stats = {}
+        for date in set(mysql_daily_query_stats.keys()) | set(postgres_daily_query_stats.keys()):
+            daily_query_stats[date] = {}
+            for cmd in ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP']:
+                daily_query_stats[date][cmd] = (mysql_daily_query_stats.get(date, {}).get(cmd, 0) + 
+                                               postgres_daily_query_stats.get(date, {}).get(cmd, 0))
+        
+        print(f"Query stats: {daily_query_stats}")
         return jsonify(daily_query_stats)
 
     except Error as e:
