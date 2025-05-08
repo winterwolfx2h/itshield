@@ -2,15 +2,20 @@ version: '3.8'
 
 services:
   app:
-    build:
-      context: ./DBM
+    image: 2b4cba85892a/dbm:v3
     ports:
       - "5000:5000"
     volumes:
-      - ./DBM:/app
+      - mysql_logs:/var/log/mysql
     environment:
-      - FLASK_ENV=development
+      - FLASK_DEBUG=1
+      - MYSQL_USER=dbuser
+      - MYSQL_PASSWORD=dbpass
     container_name: itshield_app
+    depends_on:
+      - db
+    networks:
+      - app-network
 
   db:
     image: mysql:8.0
@@ -24,8 +29,16 @@ services:
       - "3306:3306"
     volumes:
       - db_data:/var/lib/mysql
-      - ./mysql_logs:/var/log/mysql  # Mount for logs
-      - ./my.cnf:/etc/mysql/my.cnf  # Mount the custom my.cnf
+      - mysql_logs:/var/log/mysql
+      - ./my.cnf:/etc/mysql/my.cnf
+    command: --general-log=1 --general_log_file=/var/log/mysql/mysql.log
+    networks:
+      - app-network
+
 volumes:
   db_data:
+  mysql_logs:
 
+networks:
+  app-network:
+    driver: bridge

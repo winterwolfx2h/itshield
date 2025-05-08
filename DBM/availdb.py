@@ -2,11 +2,11 @@ import mysql.connector
 from mysql.connector import Error
 from collections import defaultdict
 from utils import query_history, daily_query_stats
+import os
 
 def check_database_availability():
     databases = [
-        {"host": "localhost", "user": "root", "password": "rootroot", "database": "employees"}
-        # Add more database configurations here
+        {"host": "db", "user": os.getenv("MYSQL_USER", "dbuser"), "password": os.getenv("MYSQL_PASSWORD", "dbpass"), "database": "employees"}
     ]
 
     availability_status = defaultdict(dict)
@@ -36,4 +36,3 @@ def check_database_availability():
 def fetch_database_availability():
     availability_status = check_database_availability()
     return query_history, availability_status, daily_query_stats
-
